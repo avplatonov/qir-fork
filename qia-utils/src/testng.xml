@@ -1,0 +1,9 @@
+<!DOCTYPE suite SYSTEM "http://testng.org/testng-1.0.dtd">
+<suite name="bpiwowar utils tests">
+  <test name="Corpus related tests">
+    <classes>
+       <class name="bpiwowar.**.*Test"/>
+    </classes>
+  </test>
+
+</suite>

@@ -1,0 +1,43 @@
+ /*
+	NEXI grammar for JavaCC
+	(c) B. Piwowarski
+*/options{  static = false;}PARSER_BEGIN(Nexi)package bpiwowar.ir.inex.nexiparser;import java.util.ArrayList;import bpiwowar.ir.inex.*;import bpiwowar.ir.query.*;
+
+@SuppressWarnings({  "all" })
+public class Nexi{}PARSER_END(Nexi)SKIP :{  " "}SKIP :{  "\n"| "\r"| "\r\n"| "\t"}TOKEN :{  < DIGIT : [ "0"-"9" ] >| < NUMBER : ("-")? (< DIGIT >)+ >| < NODE_QUALIFIER : "//" >| < LPAREN : "(" >| < RPAREN : ")" >| < COMMA : "," >| < AND :    "and"  | "AND" >| < OR :    "or"  | "OR" >| < ABOUT : "about" >| < PLUS : "+" >| < NEGATIVE : "-" >| < ALPHANUMERICS : [ "a"-"z", "A"-"Z", "0"-"9", "'" ] (< LETTERDIGITEXTRAS >)* >| < XML_TAG : < XML_NAME > (< XML_NAMECHAR >)* >| < #LETTER : [ "a"-"z", "A"-"Z" ] >| < #LETTERDIGITEXTRAS : [ "a"-"z", "A"-"Z", "0"-"9", "'", "-", "." ] >| < #XML_NAME : [ "a"-"z", "A"-"Z", ":", "_" ] >| < #XML_NAMECHAR : [ "a"-"z", "A"-"Z", "0"-"9", "_", ":", ".", "-" ] >}Query start() throws Exception :{  Query q;}{  (    (      q = co()    )  |    (      {        q = new CASQuery();      }      (        (CASQuery) q      )      .steps = cas()    )    < EOF >  )  {    return q;  }}/*
+in a CAS query:
+the initial can be the terminal "//*" to specify "a descendant of"
+the final part can be an unrestricted target path (for compatibility with INEX 2002)
+*/ArrayList < DescendantStep > cas() throws Exception :{  ArrayList < DescendantStep > ds, ds2;  Predicate p;}{  ds = path() p = cas_filter()  {    ds.get(ds.size() - 1).predicate = p;  }  (    ds2 = path()    {      p = null;    }    (      p = cas_filter()    )?    {      ds.addAll(ds2);      ds.get(ds.size() - 1).predicate = p;    }  )?  {    return ds;  }}Predicate cas_filter() throws Exception :{  Predicate p;}{  "[" p = filtered_clause() "]"  {    return p;  }}Predicate filtered_clause() throws Exception :{  Predicate p = null;  LogicalPredicate lp;}{  (    p = filter()  |    (      < LPAREN > p = filtered_clause() < RPAREN >    )  )  (    LOOKAHEAD(2)    (      (        < AND >        {          lp = new LogicalPredicate(p, LogicalPredicate.Operator.AND, null);        }      )    |      (        < OR >        {          lp = new LogicalPredicate(p, LogicalPredicate.Operator.OR, null);        }      )    )    lp.right = filtered_clause()    {      p = lp;    }  )*  {    return p;  }}Predicate filter() throws Exception :{  AboutPredicate ap;}{  ap = about_clause()  {    return ap;  }| arithmetic_clause()  {    return null;  }}AboutPredicate about_clause() throws Exception :{  COQuery aboutText = null;  ArrayList < DescendantStep > l;}{  (    < ABOUT > < LPAREN > l = relative_path() < COMMA > aboutText = co() < RPAREN >  )  {    return new AboutPredicate(l, aboutText);  }}void arithmetic_clause() throws Exception :{}{  relative_path() arithmetic_operator() < NUMBER >  {    throw new RuntimeException("Arithmetic expression not handled!!!");  }}void arithmetic_operator() throws Exception :{}{  ">"| "<"| "<="| ">="| "="}/*
+child has been eliminated and replaced with descendant. In the unlikley event
+child is ever needed, it can (most likley) be specified as those descendants enough
+to make the specification unambigious.
+now, a PATH is either:
+"//" for root
+"//A" for tag A
+"//A//B" for tag B within tag A
+"//*" for any tag
+"//A//*" for any descendant of A
+"//@A" for attribute A
+"//A//@B" for attribute B descendant of node A
+*/ArrayList < DescendantStep > path() throws Exception :{  ArrayList < DescendantStep > l;  DescendantStep s;}{  l = node_sequence()  (    s = attribute_node()    {      l.add(s);    }  )?  {    return l;  }}ArrayList < DescendantStep > relative_path() throws Exception :{  ArrayList < DescendantStep > l = null;}{  "."  (    l = path()  )?  {    return l;  }}ArrayList < DescendantStep > node_sequence() throws Exception :{  ArrayList < DescendantStep > l = new ArrayList < DescendantStep > ();  DescendantStep n;}{  (    n = node()    {      l.add(n);    }  )+  {    return l;  }}DescendantStep node() throws Exception :{  DescendantStep ds;}{  < NODE_QUALIFIER >  (    ds = named_node()  | ds = any_node()  | ds = tag_list_node()  )  {    return ds;  }}DescendantStep any_node() throws Exception :{}{  "*"  {    return new DescendantStep("*");  }}DescendantStep attribute_node() throws Exception :{  String s;}{  "@" s = tag()  {    return new DescendantStep("@" + s);  }}DescendantStep named_node() throws Exception :{  String s;}{  s = tag()  {    return new DescendantStep(s);  }}DescendantStep tag_list_node() throws Exception :{  DescendantStep ds;}{  "(" ds = tag_list() ")"  {    return ds;  }}DescendantStep tag_list() throws Exception :{  DescendantStep ds = new DescendantStep();  String s;}{  s = tag()  {    ds.tags.add(s);  }  (    "|" s = tag()    {      ds.tags.add(s);    }  )+  {    return ds;  }}String tag() throws Exception :{  Token t;}{  (    t = alphanumeric()  | t = < XML_TAG >  )  {    return t.toString();  }}/*
+CO topics are sequences of numbers, terms and phrases with optional specifiers
+mandatory (+) and unwanted (-)
+note:
+"12" is a number
+"-12" is number
+"- 12" is don’t search for number 12
+"--12" | "- -12" is don’t search for number -12
+"-- 12" is an error
+"content-based" is an error
+*/COQuery co() throws Exception :{  COQuery at = new COQuery();  Requirement t;}{  t = requirement()  {    at.add(t);  }  (    < COMMA > t = requirement()    {      at.add(t);    }  )*  {    return at;  }}Requirement requirement() throws Exception :{  Requirement r = new Requirement();  Text t;}{  (    t = term()    {      r.terms.add(t);    }  )+  {    return r;  }}Text term() throws Exception :{  Text t = null;  Restriction r = Restriction.NONE;}{  (    r = term_restriction()  )?  t = unrestricted_term()  {    t.restriction = r;    return t;  }}Restriction term_restriction() throws Exception :{}{  < PLUS >  {    return Restriction.PLUS;  }| < NEGATIVE >  {    return Restriction.NEGATIVE;  }}Text unrestricted_term() throws Exception :{  String t;  Phrase p;}{  t = word()  {    return new Term(t);  }| p = phrase()  {    return p;  }}/*
+	A phrase is a sequence of two or more words surounded by double quotes
+*/Phrase phrase() throws Exception :{  Phrase p;}{  "\"" p = word_list() "\""  {    return p;  }}Phrase word_list() throws Exception :{  Phrase p = new Phrase();  Term t;}{  t = phrase_term()  {    p.terms.add(t);  }  (    t = phrase_term()    {      p.terms.add(t);    }  )+  {    return p;  }}Term phrase_term() throws Exception :{  Term term = new Term();}{  (    (      term.restriction = term_restriction()    )?    term.word = word()  )  {    return term;  }}/*
+a word is a sequence:
+of alphabetics
+of digits
+of digits preceeded by a negative (-) sign (a negative number)
+alphanumerics starting with an alpha (for both ip1 tags and Y2K queries)
+As the operators are also valid search terms, a word is
+operator or a sequence of alphabetic characters
+*/String word() throws Exception :{  Token t;}{  (    t = < NUMBER >  | t = < DIGIT >  | t = alphanumeric()  )  {    return t.toString();  }}Token alphanumeric() throws Exception :{  Token t;}{  (    t = < ALPHANUMERICS >  | t = < ABOUT >  | t = < OR >  | t = < AND >  )  {    return t;  }}
